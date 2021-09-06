@@ -15,6 +15,7 @@ class TestMessage(object):
     def test_mm_conversion(self):
         m = Message()
         m.payload = b'\00'
+        m.timestamp = 2 ** 31
         mm = m.to_mist_message()
         m2 = Message(mm)
 
