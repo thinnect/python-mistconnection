@@ -2,6 +2,14 @@
 
 Basic Mist connection library for Python.
 
+See [mist-cloud-comm](https://github.com/thinnect/mist-cloud-comm)
+for information on the messaging logic used for the connection library.
+
+## Using the package
+
+See [example.py](src/mistconnection/example.py) for a basic example of
+connecting, receiving and sending a message.
+
 ## Build the package
 
 Make sure you have an up-to-date PyPA build:
