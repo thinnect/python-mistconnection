@@ -92,7 +92,6 @@ class Connection(threading.Thread):
                 log.error(f"AMID {m.amid:016X} bad receiver type '{type(receiver)}'")
 
     def _send(self, m: Message) -> None:
-        mm = m.to_mist_message()
 
         if m.source == 0:
             m.source = self._eui64
@@ -106,7 +105,7 @@ class Connection(threading.Thread):
             rgw = str(m.gateway)
 
         rkey = f'mist.{rgw}.{m.destination}'
-        body = mm.SerializeToString()
+        body = m.to_mist_message().SerializeToString()
         self._outgoing.basic_publish(exchange=self._exchange, routing_key=rkey, body=body)
 
         if log.isEnabledFor(logging.DEBUG):
