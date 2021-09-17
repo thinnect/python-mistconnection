@@ -9,6 +9,15 @@ __license__ = 'MIT'
 class EUI64(object):
 
     def __init__(self, eui):
+        if isinstance(eui, str):
+            eui = int(eui, 16)
+        elif isinstance(eui, bytes):
+            eui = int(eui.hex(), 16)
+        elif isinstance(eui, int):
+            pass
+        else:
+            raise TypeError(type(eui))
+
         self._value : int = eui
 
     def __int__(self):
