@@ -143,26 +143,34 @@ class Connection(threading.Thread):
 
             log.info("connected")
 
-            for method, _, body in self._incoming.consume(qname, True, True, None, 1.0):
+            try:
+                for method, _, body in self._incoming.consume(qname, True, True, None, 1.0):
 
-                if method is not None:
-                    mm = MistMessage()
-                    try:
-                        mm.ParseFromString(body)
-                    except DecodeError:
-                        log.warning(f'\nERROR PARSING:\n{method.routing_key}\n{body.hex()}\n')
-                    self._deliver(mm)
+                    if method is not None:
+                        mm = MistMessage()
+                        try:
+                            mm.ParseFromString(body)
+                        except DecodeError:
+                            log.warning(f'\nERROR PARSING:\n{method.routing_key}\n{body.hex()}\n')
+                        self._deliver(mm)
 
-                while True:
-                    try:
-                        message = self._out.get(False)
-                    except queue.Empty:
+                    while True:
+                        try:
+                            message = self._out.get(False)
+                        except queue.Empty:
+                            break
+                        self._send(message)
+
+                    if self.interrupted:
                         break
-                    self._send(message)
 
-                if self.interrupted:
-                    break
+            except pika.exceptions.AMQPError as e:
+                log.warning("disconnected %s", e)
 
-            self._connection.close()
+            try:
+                self._connection.close()
+                log.info("disconnected")
+            except pika.exceptions.ConnectionWrongStateError:
+                pass  # alrady closed
 
         log.debug("over")
