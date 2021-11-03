@@ -10,6 +10,7 @@ import threading
 import socket
 import queue
 import pika
+import time
 
 from typing import Union
 from typing import Callable
@@ -45,7 +46,7 @@ class Connection(threading.Thread):
         """
         super(Connection, self).__init__()
 
-        self.interrupted : bool = False
+        self._interrupted : bool = False
         self._amqp = amqp
         self._exchange = exchange
 
@@ -65,12 +66,17 @@ class Connection(threading.Thread):
 
         self._name = socket.gethostname()
 
-        self._out = queue.Queue()
+        self._out = None
+
+        self._connection_backoff = 1
 
         self._receivers : Dict[int, type_mm_receiver] = {}
 
     def send(self, message: Message) -> None:
-        self._out.put(message)
+        if self._out is not None:
+            self._out.put(message)
+        else:
+            log.warning("message discarded")
 
     def register_receiver(self, ptype: int,
                           receiver: type_mm_receiver) -> None:
@@ -91,7 +97,7 @@ class Connection(threading.Thread):
             else:
                 log.error(f"AMID {m.amid:016X} bad receiver type '{type(receiver)}'")
 
-    def _send(self, m: Message) -> None:
+    def _send(self, outgoing, m: Message) -> None:
 
         if m.source == 0:
             m.source = self._eui64
@@ -106,7 +112,8 @@ class Connection(threading.Thread):
 
         rkey = f'mist.{rgw}.{m.destination}'
         body = m.to_mist_message().SerializeToString()
-        self._outgoing.basic_publish(exchange=self._exchange, routing_key=rkey, body=body)
+
+        outgoing.basic_publish(exchange=self._exchange, routing_key=rkey, body=body)
 
         if log.isEnabledFor(logging.DEBUG):
             log.debug(f"{rkey} {body.hex().upper()}")
@@ -115,36 +122,45 @@ class Connection(threading.Thread):
         self.start()
 
     def close(self):
-        self.interrupted = True
+        self._interrupted = True
         self.join()
+
+    def _backoff(self):
+        for _ in range(self._connection_backoff):
+            if self._interrupted:
+                break
+            time.sleep(1)
+        if self._connection_backoff < 60:
+            self._connection_backoff *= 2
 
     def run(self):
         log.debug("run")
 
-        while not self.interrupted:
-            cp = pika.URLParameters(self._amqp)
-            self._connection = pika.BlockingConnection(cp)
-
-            self._incoming = self._connection.channel()
-            self._outgoing = self._connection.channel()
-
-            qn = f'cloud-{self._name}-{self._gateway}'
-
-            qdresult = self._incoming.queue_declare(queue=qn, auto_delete=True)
-            qname = qdresult.method.queue
-
-            self._incoming.queue_bind(queue=qname, exchange=self._exchange,
-                                      routing_key=f"cloud.{self._gateway}.{self._eui64}")
-
-            self._incoming.queue_bind(queue=qname, exchange=self._exchange,
-                                      routing_key=f"cloud.{self._gateway}.FFFFFFFFFFFFFFFF")
-
-            self._connected = True
-
-            log.info("connected")
-
+        while not self._interrupted:
+            connection = None
             try:
-                for method, _, body in self._incoming.consume(qname, True, True, None, 1.0):
+                cp = pika.URLParameters(self._amqp)
+                connection = pika.BlockingConnection(cp)
+
+                incoming = connection.channel()
+                outgoing = connection.channel()
+
+                qn = f'cloud-{self._name}-{self._gateway}'
+
+                qdresult = incoming.queue_declare(queue=qn, auto_delete=True)
+                qname = qdresult.method.queue
+
+                incoming.queue_bind(queue=qname, exchange=self._exchange,
+                                        routing_key=f"cloud.{self._gateway}.{self._eui64}")
+
+                incoming.queue_bind(queue=qname, exchange=self._exchange,
+                                        routing_key=f"cloud.{self._gateway}.FFFFFFFFFFFFFFFF")
+
+                log.info("connected")
+                self._connection_backoff = 1
+                self._out = queue.Queue()
+
+                for method, _, body in incoming.consume(qname, True, True, None, 1.0):
 
                     if method is not None:
                         mm = MistMessage()
@@ -159,18 +175,30 @@ class Connection(threading.Thread):
                             message = self._out.get(False)
                         except queue.Empty:
                             break
-                        self._send(message)
+                        self._send(outgoing, message)
 
-                    if self.interrupted:
+                    if self._interrupted:
                         break
 
             except pika.exceptions.AMQPError as e:
-                log.warning("disconnected %s", e)
+                log.warning("disconnected (%s)", e)
+                self._backoff()
+            except socket.error as e:
+                log.warning("unable to connect (%s)", e)
+                self._backoff()
 
-            try:
-                self._connection.close()
-                log.info("disconnected")
-            except pika.exceptions.ConnectionWrongStateError:
-                pass  # alrady closed
+            if connection is not None:
+                try:
+                    connection.close()
+                    log.info("closed")
+                except pika.exceptions.ConnectionWrongStateError:
+                    pass  # already closed
+
+                connection = None
+
+            if self._out is not None:
+                if len(self._out) > 0:
+                    log.warning("discarded %d old messages", len(self._out))
+                self._out = None
 
         log.debug("over")
