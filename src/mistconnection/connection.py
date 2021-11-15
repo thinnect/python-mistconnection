@@ -197,8 +197,8 @@ class Connection(threading.Thread):
                 connection = None
 
             if self._out is not None:
-                if len(self._out) > 0:
-                    log.warning("discarded %d old messages", len(self._out))
+                if self._out.qsize() > 0:
+                    log.warning("discarded %d old messages", self._out.qsize())
                 self._out = None
 
         log.debug("over")
