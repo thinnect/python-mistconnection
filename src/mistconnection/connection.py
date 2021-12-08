@@ -142,8 +142,28 @@ class Connection(threading.Thread):
                 cp = pika.URLParameters(self._amqp)
                 connection = pika.BlockingConnection(cp)
 
-                incoming = connection.channel()
                 outgoing = connection.channel()
+                try:
+                    outgoing.exchange_declare(exchange=self._exchange,
+                                              exchange_type="topic",
+                                              passive=True,
+                                              durable=True,
+                                              auto_delete=False,
+                                              internal=False,
+                                              arguments=None)
+                    log.info(f"exchange '{self._exchange}' exists")
+                except pika.exceptions.ChannelClosed:
+                    outgoing = connection.channel()
+                    outgoing.exchange_declare(exchange=self._exchange,
+                                              exchange_type="topic",
+                                              passive=False,
+                                              durable=True,
+                                              auto_delete=False,
+                                              internal=False,
+                                              arguments=None)
+                    log.info(f"created exchange '{self._exchange}'")
+
+                incoming = connection.channel()
 
                 qn = f'cloud-{self._name}-{self._gateway}'
 
