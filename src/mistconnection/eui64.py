@@ -71,7 +71,7 @@ class EUI64(object):
             return self._value != other._value
         if isinstance(other, int):
             return self._value != other
-        return False
+        return True
 
     def __hash__(self):
         return self._value
