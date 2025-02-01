@@ -139,9 +139,10 @@ class Connection(threading.Thread):
         while not self._interrupted:
             connection = None
             try:
+                log.info("connecting")
                 cp = pika.URLParameters(self._amqp)
                 connection = pika.BlockingConnection(cp)
-
+                log.info("declaring")
                 outgoing = connection.channel()
                 try:
                     outgoing.exchange_declare(exchange=self._exchange,
@@ -169,7 +170,7 @@ class Connection(threading.Thread):
 
                 qdresult = incoming.queue_declare(queue=qn, auto_delete=True)
                 qname = qdresult.method.queue
-
+                log.info("binding")
                 incoming.queue_bind(queue=qname, exchange=self._exchange,
                                         routing_key=f"cloud.{self._gateway}.{self._eui64}")
 
@@ -203,16 +204,25 @@ class Connection(threading.Thread):
             except pika.exceptions.AMQPError as e:
                 log.warning("disconnected (%s)", e)
                 self._backoff()
+            except pika.adapters.utils.connection_workflow.AMQPConnectorException:
+                log.warning("failed to connect (%s)", e)
+                self._backoff()
             except socket.error as e:
                 log.warning("unable to connect (%s)", e)
                 self._backoff()
+            except Exception as e:
+                log.error("unexpected exception: %s", e)
+                raise e
 
             if connection is not None:
                 try:
                     connection.close()
                     log.info("closed")
                 except pika.exceptions.ConnectionWrongStateError:
-                    pass  # already closed
+                    log.info("already closed")
+                except Exception as e:
+                    log.error("unexpected exception: %s", e)
+                    raise e
 
                 connection = None
 
