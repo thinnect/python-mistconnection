@@ -204,7 +204,7 @@ class Connection(threading.Thread):
             except pika.exceptions.AMQPError as e:
                 log.warning("disconnected (%s)", e)
                 self._backoff()
-            except pika.adapters.utils.connection_workflow.AMQPConnectorException:
+            except pika.adapters.utils.connection_workflow.AMQPConnectorException as e:
                 log.warning("failed to connect (%s)", e)
                 self._backoff()
             except socket.error as e:
